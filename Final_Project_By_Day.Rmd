@@ -1,0 +1,827 @@
+---
+title: "STAT_382_Final_Project"
+author: "Thomas Gierach"
+date: "11/20/2019"
+output: html_document
+---
+
+Functions
+```{r, eval = TRUE, echo = TRUE}
+ImportData <- function(string){
+  # Function reads a .csv and converts into a dataframe
+  # 
+  # Args:
+  #   string: the name of the file
+  # 
+  # Returns: 
+  #   the dataframe from the .csv
+  
+  data <- read.csv(string)
+  return(data)
+}
+
+ImportPollData <- function(string){
+  #creating the dataframe
+  data <- read.csv(string)
+  #Converting Date Range to Dates
+  data <- GetDatesFromPolls(data)
+  #Sorting the polls by Date
+  data <- data[order(data$Date, decreasing = FALSE),]
+  return(data)
+}
+
+ColumnToDateType <- function(data) {
+  # Takes the Date column of a dataframe and converts it to a Date type
+  # 
+  # Args:
+  #   data: a dataframe
+  # 
+  # Returns: 
+  #   the dataframe 
+  
+  data$date <- as.Date(data$date, "%Y-%m-%d")
+  return(data)
+}
+
+SubsetOfStateByCommitteeName <- function(data, string){
+  # Subsets the dataframe by candidate
+  #
+  # Args:
+  #   data: a dataframe
+  #   string: a selection in the dataframe column "committee_name"
+  # Return:
+  #   the dataframe
+  new_data <- data[data$committee_name == string, ]
+  return(new_data)
+}
+
+CandidateQuarterTotalSums <- function(data){
+  # Gets the total sum of donations for the candidate
+  #
+  # Args:
+  #   data: the dataframe
+  #   condition: a conditional statement
+  # 
+  # Returns:
+  #   the total sum donated to the candidate
+  s <- sum(data$amount, na.rm=T) 
+  
+  return(s)
+}
+
+CandidateQuarterIndividualSums <- function(state_contribution_data){
+  # Gets the total sum of donations by individual for the candidate
+  #
+  # Args:
+  #   data: the dataframe
+  # 
+  # Returns:
+  #   the total sum donated to the candidate by individuals
+  ind <- state_contribution_data[state_contribution_data$flag_orgind == "IND"]
+  s <- sum(ind$amount, na.rm=T) 
+  return(s)
+}
+
+CandidateQuarterPACSums <- function(state_contribution_data){
+  # Gets the total sum of donations by individual for the candidate
+  #
+  # Args:
+  #   data: the dataframe
+  # 
+  # Returns:
+  #   the total sum donated to the candidate by individuals
+  pac <- state_contribution_data[state_contribution_data$flag_orgind == 'PAC']
+  s <- sum(pac$amount, na.rm=T) 
+  
+  return(s)
+}
+
+GetDatesFromPolls <- function(poll_data){
+  # First converts the column of Dates in poll data to String
+  # to extract the first month and day from the string.
+  # Then it converts this day and month to a Date type
+  # 
+  # Args:
+  #   poll_data: the dataframe containing poll data
+  # 
+  # Returns:
+  #   poll_data
+  
+  # converting data$Date to String
+  poll_data$Date <- sapply(poll_data$Date, toString)
+  #print(poll_data$Date)
+  l <- length(poll_data$Date)
+  
+  # getting the first month/day of the string
+  y = poll_data$Date
+  z <- sapply(2:l,function(i){strsplit(y, split = " ")[[i]][1]})
+  # converting the string to Date type
+  z <- as.Date(y, "%m/%d")
+  poll_data$Date <- z
+  
+  #print(poll_data$Date)
+  
+  # Making sure the data doesn't have 2018 data
+  index <- which(poll_data$Date > as.Date("2019-01-12", "%Y-%d-%m"))
+  if(length(index) > 0){
+    poll_data <- poll_data[c(-index), ]
+  }
+  return(poll_data)
+}
+
+PollByCandidate <- function(data, candidate_name){
+  # Subsets a poll by candidate name
+  # 
+  # Args:
+  #   data:             the dataframe containing the political poll
+  #   candidate_name:   a string by the candidate's name
+  # 
+  # Returns:
+  #   a poll containg the candidates poll numbers
+  index <- which(colnames(data) == candidate_name)
+  candidate_poll <- data[, c(2,index)]
+  return(candidate_poll)
+}
+
+CreateEmptyDataFrame2 <- function(){
+  # creates an empty dataframe to be used for each state
+  # 
+  # Args:
+  #   None
+  # 
+  # Returns:
+  #   Empty Dataframe
+  
+  df <- data.frame(Date=date(),
+                 Polling=double(),
+                 Contributions=double(),
+                 Poll_Slopes=double(),
+                 Cont_Slopes=double(),
+                 Candidate = factor(),
+                 stringsAsFactors=FALSE)
+  names <- c("Date", "Polling", "Contributions", "Poll_Slopes", "Contribution_Slopes", "Candidate")
+  colnames(df) <- names
+  return(df)
+}
+
+GraphAmountAverageAndPollByDate <- function(state_data, state) {
+  # multiping the Polling Date by 10 to better visualize it
+  state_data$Polling <- (state_data$Polling)*(10)
+  df <- state_data %>%
+  # selecting the variables to use in the graph
+      select(Date, Contributions, Polling) %>%
+  # the keys are above and the values are what their values by Date
+      gather(key = "variable", value = "value", -Date)
+  # Plotting the data with Date on the x and the other variables on the y
+  ggplot(df, aes(x = Date, y = value)) +
+  geom_line(aes(color = variable), size = 1) +
+    # Creating the colors for the graph
+  scale_color_manual(values = c("#00AFBB", "#E7B800")) +
+  theme_minimal() + ggtitle(paste(state, ": Polling and Individual Donations for ", state_data$Candidate[1], sep = "")) + xlab("2019 by Day") + ylab("Daily Contriibutions and Polling Data (x1000-10000)")
+  #source for code: http://www.sthda.com/english/articles/32-r-graphics-essentials/128-plot-time-series-data-using-ggplot/
+}
+
+GraphAmountAndPollSlopeByDate <- function(state_data, state) {
+  state_data$Poll_Slopes <- (state_data$Poll_Slopes)*(10)
+  df <- state_data %>%
+      select(Date, Contribution_Slopes, Poll_Slopes) %>%
+      gather(key = "variable", value = "value", -Date)
+  ggplot(df, aes(x = Date, y = value)) +
+  geom_line(aes(color = variable), size = 1) +
+  scale_color_manual(values = c("#00AFBB", "#E7B800")) +
+  theme_minimal() + ggtitle(paste(state, ": Polling and Individual Donations for ", state_data$Candidate[1], sep = "")) + xlab("2019 by Day") + ylab("Daily Contriibutions and Polling Data (x1000-10000)")
+  #source for code: http://www.sthda.com/english/articles/32-r-graphics-essentials/128-plot-time-series-data-using-ggplot/
+}
+
+AveragePollsIfSameDay <- function(candidate_state_poll){
+  y = candidate_state_poll
+  v <- 1:floor(length(y[,2])/2)
+  
+  for(i in 1:length(y[,2]) - 1){
+    #Finding the time frame of days in between each poll
+    diff = as.integer(y[i,2] - y[i+1,2])
+    v[i] <- diff
+  }
+  find_zero_indexes <- which(v == 0)
+  
+  for (i in 1:length(find_zero_indexes)){
+    z = find_zero_indexes
+    #Taking the averages of two dates with the same date
+    y[z[i], 3:(length(y)-1)] <- (y[z[i], 3:(length(y) - 1)] + y[z[i] + 1, 3:(length(y)-1)])/2
+  }
+  
+  to_remove <- find_zero_indexes + 1
+  y <- y[-to_remove, ]
+  return(y)
+}
+
+InterpolatePollByCandidate <- function(candidate_state_poll){
+  y = candidate_state_poll
+  y[,2] <- as.double(y[,2])
+
+  #creating a nearly empty data frame
+  df <- data.frame(as.Date("01/01/2019", "%d/%m/%y"), 0.0, stringsAsFactors = FALSE)
+  #making the colnames of the empty dataframe the same as candidate state poll
+  colnames(df) <- colnames(y)
+  #Starting the interpolation
+  for(i in 1:(length(y[,1]) - 1)){
+    date_diff = as.integer(y[i,1] - y[i+1, 1])
+    poll_diff = as.double(y[i, 2] - y[i+1, 2])
+    diff = as.double(poll_diff/date_diff)
+    #creating sequence of dates
+    dates <- seq.Date(y$Date[i], y$Date[i+1], "day" )
+    #interpolating poll numbers
+    poll <- seq(from = y[i,2], to = y[i+1, 2], by = diff)
+    #placing the dates and poll numbers into a dataframe
+    df2 <- data.frame(dates, poll)
+    #making sure the colnames are the same
+    colnames(df2) <- colnames(df)
+    #row binding the two dataframes
+    df <- rbind(df, df2)
+  }
+  df <- unique(df)
+  colnames(df) <- c("Date", "Polling")
+  return(df)
+}
+
+GetSlopes <- function(data){
+  temp <- data
+  for(i in 1:(length(data[,1]) - 1)){
+    #run is always 1
+    rise = data[i+1,2] - data[i, 2]
+    temp[i+1, 2] <- as.double(rise)
+  }
+  return(temp[,2])
+}
+
+SumDonationDataByDay <- function(state_contribution_data, beginning_date){
+  
+  z = state_contribution_data
+  z <- z[order(z$date, decreasing = FALSE),]
+
+  cont_dates <- seq.Date(as.Date(beginning_date, "%Y-%m-%d"), as.Date(z$date[length(z$date)]), by = "day")
+  amounts <- 1:length(cont_dates)
+
+  z.1 <- z[z$date == cont_dates[50],]
+  z.1
+  for (i in 1:length(cont_dates)){
+    z.1 <- z[z$date == cont_dates[i],]
+    if(length(z.1[,1]) != 0){
+      amounts[i] <- sum(z.1$amount)
+    } else {
+      amounts[i] <- 0.0
+    }
+  }
+  
+
+  amounts_2 <- amounts
+  sum = 0.00
+  for(i in 1:length(amounts)){
+    sum = sum + amounts[i]
+    amounts_2[i] <- sum
+  }
+  df <- data.frame(cont_dates, amounts_2)
+  colnames(df) <- c("Date", "Contributions")
+  
+  return(df)
+}
+
+AverageDonationDataByDay <- function(state_contribution_data, beginning_date){
+  
+  z = state_contribution_data
+  z <- z[order(z$date, decreasing = FALSE),]
+
+  cont_dates <- seq.Date(as.Date(beginning_date, "%Y-%m-%d"), as.Date(z$date[length(z$date)]), by = "day")
+  amounts <- 1:length(cont_dates)
+
+  z.1 <- z[z$date == cont_dates[50],]
+  for (i in 1:length(cont_dates)){
+    z.1 <- z[z$date == cont_dates[i],]
+    if(length(z.1[,1]) != 0){
+      amounts[i] <- sum(z.1$amount)
+    } else {
+      amounts[i] <- 0.0
+    }
+  }
+
+  amounts_2 <- amounts
+  sum = 0.00
+  for(i in 1:length(amounts)){
+    sum = sum + amounts[i]
+    amounts_2[i] <- sum/i
+  }
+  df <- data.frame(cont_dates, amounts_2)
+  colnames(df) <- c("Date", "Contributions")
+  
+  return(df)
+}
+
+SlopesToBinary <- function(data){
+  #data$Polls_Binary <- data$Poll_Slopes
+  #data$Contributions_Binary <- data$Contributions
+  data$Polls_Binary <- rep(0,length(data[,1]))
+  data$Contributions_Binary <- rep(0,length(data[,1]))
+  
+  for(i in 1:length(data[,1])){
+    if(data$Poll_Slopes[i] < 0){
+      data$Polls_Binary[i] <- 0
+    } else{
+      data$Polls_Binary[i] <- 1
+    }
+    if(data$Contribution_Slopes[i] < 0){
+      data$Contributions_Binary[i] <- 0
+    } else{
+      data$Contributions_Binary[i] <- 1
+    }
+  }
+
+  # data[data$Polls_Binary < 0] <- c(0)
+  # data[data$Polls_Binary >= 0] <- c(1)
+  # data$Polls_Binary <- as.factor(data$Polls_Binary)
+  # 
+  # data[data$Contributions_Binary < 0] <- c(0)
+  # data[data$Contributions_Binary >= 0] <- c(1)
+  # data$Contributions_Binary <- as.factor(data$Contributions_Binary)
+  
+  return(data)
+}
+
+Operation2 <- function(data, poll_data, candidate_pac_name, candidate_name){
+  # Subsets contribution data and poll_data by candidate_pac_name and candidate_name respectively.
+  # Interpolates the Polling Data. Sums by day the contribution data.
+  # Combines this new polling and contribution data into a dataframe.
+  # 
+  # Args:
+  #   data:               a dataframe containing donations for a single state
+  #   poll_data:          a dataframe containing polling numbers for a single state
+  #   candidate_pac_name: a string of the candidate's committee name
+  #   candidate_name:     a string of the candidate's last name
+  # 
+  # Returns:
+  #   df_to_return
+  
+  # getting the quarter averages for the state
+  candidate_state_poll <- PollByCandidate(poll_data, candidate_name)
+  # getting Interpolated Poll Data
+  candidate_state_poll_interpolated <- InterpolatePollByCandidate(candidate_state_poll)
+  
+  # isolating candidate name
+  candidate <- SubsetOfStateByCommitteeName(data, candidate_pac_name)
+  
+  # getting running total by day for contributions
+  candidate_summed <- AverageDonationDataByDay(candidate, min(candidate_state_poll$Date))
+  y = candidate_summed
+
+  # making sure the dataframe only goes to max(date) of contribution data
+  x = candidate_state_poll_interpolated
+  x <- x[x$Date <= max(candidate$date), ]
+  
+  # getting the slopes for both polls
+  Poll_Slopes <- GetSlopes(x)
+  Contribution_Slopes <- GetSlopes(y)
+  
+  # putting all data into data frames
+  names <- c("Date", "Polling", "Contributions", "Poll_Slopes", "Contribution_Slopes", "Candidate")
+  name <- rep(candidate_name, times = length(x$Date))
+  df2 <- cbind(x, y[,2], Poll_Slopes, Contribution_Slopes,name)
+  colnames(df2) <- names
+  
+  # converting zeros in Contributions to NA's and removing
+  df2[df2$Contributions == 0,] <- NA
+  df2 <- na.omit(df2)
+  
+  df2 <- SlopesToBinary(df2)
+  
+  return(df2)
+}
+
+IntersectionOfBinaries <- function(data){
+  # converting binary columns to factors
+  data$Polls_Binary <- as.factor(data$Polls_Binary)
+  data$Contributions_Binary <- as.factor(data$Contributions_Binary)
+  # getting the intersection of the true binary data
+  intersection <- (data$Polls_Binary == "1" & data$Contributions_Binary == "1") | (data$Polls_Binary == "0" & data$Contributions_Binary == "0")
+  
+  return(intersection)
+}
+
+ProbabilityOfTruth <- function(intersection){
+  prob_true_true <- sum(intersection == TRUE)/length(intersection)
+  return(prob_true_true)
+}
+```
+
+Importing Polling and Donor Data for Each State.
+```{r eval = TRUE, echo = FALSE}
+
+#setwd("C:/Users/giera/OneDrive/Documents/School/R/Projects/STAT_382_Final_Project/Data")
+library(stringr)
+# importing the polling data
+
+iowa_polls_2019 <- ImportPollData("Iowa_Polling_Data_2019.csv")
+new_hampshire_polls_2019 <- ImportPollData("New Hampshire - Polling Data 2019.csv")
+texas_polls_2019 <- ImportPollData("Texas - Polling Data 2019.csv")
+california_polls_2019 <- ImportPollData("California - Polling Data 2019.csv")
+massachusetts_polls_2019 <- ImportPollData("Massachusetts - Polling Data 2019.csv")
+south_carolina_polls_2019 <- ImportPollData("South Carolina  - Polling Data 2019.csv")
+nevada_polls_2019 <- ImportPollData("Nevada - Polling Data 2019.csv")
+
+# importing the campaign donation data for quarter 1
+iowa_campaign_contributions_quarter_1 <- ImportData("contributions_q1_2019_IA.csv")
+new_hampshire_contributions_quarter_1 <- ImportData("contributions_q1_2019_NH.csv")
+texas_contributions_quarter_1 <- ImportData("contributions_q1_2019_TX.csv")
+california_contributions_quarter_1 <- ImportData("contributions_q1_2019_CA.csv")
+massachusetts_contributions_quarter_1 <- ImportData("contributions_q1_2019_MA.csv")
+south_carolina_contributions_quarter_1 <- ImportData("contributions_q1_2019_SC.csv")
+nevada_contributions_quarter_1 <- ImportData("contributions_q1_2019_NV.csv")
+
+# importing the campaign donation data for quarter 2
+iowa_campaign_contributions_quarter_2<- ImportData("contributions_q2_2019_IA.csv")
+new_hampshire_contributions_quarter_2 <- ImportData("contributions_q2_2019_NH.csv")
+texas_contributions_quarter_2 <- ImportData("contributions_q2_2019_TX.csv")
+california_contributions_quarter_2 <- ImportData("contributions_q2_2019_CA.csv")
+massachusetts_contributions_quarter_2 <- ImportData("contributions_q2_2019_MA.csv")
+south_carolina_contributions_quarter_2 <- ImportData("contributions_q2_2019_SC.csv")
+nevada_contributions_quarter_2 <- ImportData("contributions_q2_2019_NV.csv")
+
+# importing the campaign donation data for quarter 3
+iowa_campaign_contributions_quarter_3<- ImportData("contributions_q3_2019_IA.csv")
+new_hampshire_contributions_quarter_3 <- ImportData("contributions_q3_2019_NH.csv")
+texas_contributions_quarter_3 <- ImportData("contributions_q3_2019_TX.csv")
+california_contributions_quarter_3 <- ImportData("contributions_q3_2019_CA.csv")
+massachusetts_contributions_quarter_3 <- ImportData("contributions_q3_2019_MA.csv")
+south_carolina_contributions_quarter_3 <- ImportData("contributions_q3_2019_SC.csv")
+nevada_contributions_quarter_3 <- ImportData("contributions_q3_2019_NV.csv")
+
+# combining the state quarters into one dataframe
+iowa_campaign_contributions <- rbind(iowa_campaign_contributions_quarter_1, rbind(iowa_campaign_contributions_quarter_2, iowa_campaign_contributions_quarter_3))
+new_hampshire_contributions <- rbind(new_hampshire_contributions_quarter_1, rbind(new_hampshire_contributions_quarter_2, new_hampshire_contributions_quarter_3))
+texas_contributions <- rbind(texas_contributions_quarter_1, rbind(texas_contributions_quarter_2, texas_contributions_quarter_3))
+california_contributions <- rbind(california_contributions_quarter_1, rbind(california_contributions_quarter_2, california_contributions_quarter_3))
+massachusetts_contributions <- rbind(massachusetts_contributions_quarter_1, rbind(massachusetts_contributions_quarter_2, massachusetts_contributions_quarter_3))
+south_carolina_contributions <- rbind(south_carolina_contributions_quarter_1, rbind(south_carolina_contributions_quarter_2, south_carolina_contributions_quarter_3))
+nevada_contributions <- rbind(nevada_contributions_quarter_1, rbind(nevada_contributions_quarter_2, nevada_contributions_quarter_3))
+
+# Using ColumnToDateType to convert the column of the dataframes in quarters to Date type
+iowa_campaign_contributions <- ColumnToDateType(iowa_campaign_contributions)
+new_hampshire_contributions <- ColumnToDateType(new_hampshire_contributions)
+texas_contributions <- ColumnToDateType(texas_contributions)
+california_contributions <- ColumnToDateType(california_contributions)
+massachusetts_contributions <- ColumnToDateType(massachusetts_contributions)
+south_carolina_contributions <- ColumnToDateType(south_carolina_contributions)
+nevada_contributions <- ColumnToDateType(nevada_contributions)
+
+```
+
+```{r, echo = FALSE, eval = TRUE}
+candidates <- c("Biden", "Booker", "Buttigieg", "Harris", "Klobuchar", "Sanders", "Warren", "Yang")
+pac_names <- c("Biden For President", "Cory 2020", "Pete For America, Inc.", "Kamala Harris For The People", "Amy For America", "Bernie 2020", "Warren For President, Inc.", "Friends Of Andrew Yang")
+
+iowa_Biden <- PollByCandidate(iowa_polls_2019, "Biden")
+iowa_Biden <- InterpolatePollByCandidate(iowa_Biden)
+#Collecting all candidate Data for Iowa
+Biden_Iowa <- Operation2(iowa_campaign_contributions, iowa_polls_2019, pac_names[1], candidates[1])
+Booker_Iowa <- Operation2(iowa_campaign_contributions, iowa_polls_2019, pac_names[2], candidates[2])
+Buttigieg_Iowa <- Operation2(iowa_campaign_contributions, iowa_polls_2019, pac_names[3], candidates[3])
+Harris_Iowa <- Operation2(iowa_campaign_contributions, iowa_polls_2019, pac_names[4], candidates[4])
+Klobuchar_Iowa <- Operation2(iowa_campaign_contributions, iowa_polls_2019, pac_names[5], candidates[5])
+Sanders_Iowa <- Operation2(iowa_campaign_contributions, iowa_polls_2019, pac_names[6], candidates[6])
+Warren_Iowa <- Operation2(iowa_campaign_contributions, iowa_polls_2019, pac_names[7], candidates[7])
+Yang_Iowa <- Operation2(iowa_campaign_contributions, iowa_polls_2019, pac_names[8], candidates[8])
+
+plot(Biden_Iowa$Contribution_Slopes, Biden_Iowa$Poll_Slopes)
+plot(Booker_Iowa$Contribution_Slopes, Booker_Iowa$Poll_Slopes)
+plot(Buttigieg_Iowa$Contribution_Slopes, Buttigieg_Iowa$Poll_Slopes)
+plot(Harris_Iowa$Contribution_Slopes, Harris_Iowa$Poll_Slopes)
+plot(Klobuchar_Iowa$Contribution_Slopes, Klobuchar_Iowa$Poll_Slopes)
+plot(Sanders_Iowa$Contribution_Slopes, Sanders_Iowa$Poll_Slopes)
+plot(Warren_Iowa$Contribution_Slopes, Warren_Iowa$Poll_Slopes)
+plot(Yang_Iowa$Contribution_Slopes, Yang_Iowa$Poll_Slopes)
+
+plot(Biden_Iowa$Contributions_Binary, Biden_Iowa$Polls_Binary)
+plot(Booker_Iowa$Contributions_Binary, Booker_Iowa$Polls_Binary)
+plot(Buttigieg_Iowa$Contributions_Binary, Buttigieg_Iowa$Polls_Binary)
+plot(Harris_Iowa$Contributions_Binary, Harris_Iowa$Polls_Binary)
+plot(Klobuchar_Iowa$Contributions_Binary, Klobuchar_Iowa$Polls_Binary)
+plot(Sanders_Iowa$Contributions_Binary, Sanders_Iowa$Polls_Binary)
+plot(Warren_Iowa$Contributions_Binary, Warren_Iowa$Polls_Binary)
+plot(Yang_Iowa$Contributions_Binary, Yang_Iowa$Polls_Binary)
+
+p.Biden_Iowa <- IntersectionOfBinaries(Biden_Iowa)
+p.Biden_Iowa
+p.Booker_Iowa <- IntersectionOfBinaries(Booker_Iowa)
+p.Buttigieg_Iowa <- IntersectionOfBinaries(Buttigieg_Iowa)
+p.Harris_Iowa <- IntersectionOfBinaries(Harris_Iowa)
+p.Klobuchar_Iowa <- IntersectionOfBinaries(Klobuchar_Iowa)
+p.Sanders_Iowa <- IntersectionOfBinaries(Sanders_Iowa)
+p.Warren_Iowa <- IntersectionOfBinaries(Warren_Iowa)
+p.Yang_Iowa <- IntersectionOfBinaries(Yang_Iowa)
+
+successes.Biden_Iowa <- sum(p.Biden_Iowa == TRUE)
+failures.Biden_Iowa <- sum(p.Biden_Iowa == FALSE)
+p.of.success.Biden_Iowa <- ProbabilityOfTruth(p.Biden_Iowa)
+p.of.success.Biden_Iowa
+successes.Booker_Iowa <- sum(p.Booker_Iowa == TRUE)
+failures.Booker_Iowa <- sum(p.Booker_Iowa == FALSE)
+p.of.success.Booker_Iowa <- ProbabilityOfTruth(p.Booker_Iowa)
+p.of.success.Booker_Iowa
+successes.Buttigieg_Iowa <- sum(p.Buttigieg_Iowa == TRUE)
+failures.Buttigieg_Iowa <- sum(p.Buttigieg_Iowa == FALSE)
+p.of.success.Buttigieg_Iowa <- ProbabilityOfTruth(p.Buttigieg_Iowa)
+p.of.success.Buttigieg_Iowa
+successes.Harris_Iowa <- sum(p.Harris_Iowa == TRUE)
+failures.Harris_Iowa <- sum(p.Harris_Iowa == FALSE)
+p.of.success.Harris_Iowa <- ProbabilityOfTruth(p.Harris_Iowa)
+p.of.success.Harris_Iowa
+successes.Klobuchar_Iowa <- sum(p.Klobuchar_Iowa == TRUE)
+failures.Klobuchar_Iowa <- sum(p.Klobuchar_Iowa == FALSE)
+p.of.success.Klobuchar_Iowa <- ProbabilityOfTruth(p.Klobuchar_Iowa)
+p.of.success.Klobuchar_Iowa
+successes.Sanders_Iowa <- sum(p.Sanders_Iowa == TRUE)
+failures.Sanders_Iowa <- sum(p.Sanders_Iowa == FALSE)
+p.of.success.Sanders_Iowa <- ProbabilityOfTruth(p.Sanders_Iowa)
+p.of.success.Sanders_Iowa
+successes.Warren_Iowa <- sum(p.Warren_Iowa == TRUE)
+failures.Warren_Iowa <- sum(p.Warren_Iowa == FALSE)
+p.of.success.Warren_Iowa <- ProbabilityOfTruth(p.Warren_Iowa)
+p.of.success.Warren_Iowa
+successes.Yang_Iowa <- sum(p.Yang_Iowa == TRUE)
+failures.Yang_Iowa <- sum(p.Yang_Iowa == FALSE)
+p.of.success.Yang_Iowa <- ProbabilityOfTruth(p.Yang_Iowa)
+p.of.success.Yang_Iowa
+
+observations.total <- sum(length(p.Biden_Iowa)+length(p.Booker_Iowa)+length(p.Buttigieg_Iowa)+length(p.Harris_Iowa)+length(p.Klobuchar_Iowa)+length(p.Sanders_Iowa)+length(p.Warren_Iowa)+length(p.Yang_Iowa))
+
+successes.total <- sum(successes.Biden_Iowa, successes.Booker_Iowa, successes.Buttigieg_Iowa, successes.Harris_Iowa, successes.Klobuchar_Iowa, successes.Sanders_Iowa, successes.Warren_Iowa, successes.Yang_Iowa)
+
+prob.success <- successes.total/observations.total
+prob.success
+
+
+# library(ggpubr)
+# ggdensity(Biden_Iowa, x = "Polling", fill = "lightgray", title = "Polling") +
+#   scale_x_continuous() +
+#   stat_overlay_normal_density(color = "red", linetype = "dashed")
+# ggdensity(Biden_Iowa, x = "Contributions", fill = "lightgray", title = "Contributions") +
+#   scale_x_continuous() +
+#   stat_overlay_normal_density(color = "red", linetype = "dashed")
+hist(Warren_Iowa$Polling, freq = FALSE)
+hist(Biden_Iowa$Contributions)
+# 
+# par(mfrow=c(1,1))
+# trials <-c(0:length(intersection))
+# trials
+# size = length(intersection)
+# prob=prob_true_true
+# # check conditions for normal approximation
+# # size*prob > 5, size*(1-prob)>5
+# probabilities1 <-dbinom(trials,size,prob) 
+# probabilities1
+# successes1 <- trials[1:length(intersection)] 
+# 
+# binomial_probabilities1 <-probabilities1[1:length(intersection)] 
+# successes1 <- factor(successes1) 
+# successes1 <- successes1[20:72]
+# 
+# binomial_probabilities1 <- binomial_probabilities1[20:72]
+# barplot(binomial_probabilities1, names.arg = successes1, xlab = "successes", ylab = "binomial probabilities") 
+
+```
+
+``` {r, eval = TRUE, echo = TRUE}
+library(ggplot2)
+library(gganimate)
+library(gapminder)
+library(tidyr)
+library(dplyr)
+
+#Graphing Iowa Graphs By Slope
+p1 <- GraphAmountAndPollSlopeByDate(Biden_Iowa, "Iowa")
+p1
+p2 <- GraphAmountAndPollSlopeByDate(Booker_Iowa, "Iowa") #+ geom_smooth()
+p2
+p3 <- GraphAmountAndPollSlopeByDate(Buttigieg_Iowa, "Iowa") #+ geom_smooth()
+p3
+p4 <- GraphAmountAndPollSlopeByDate(Harris_Iowa, "Iowa") #+ geom_smooth()
+p4
+p5 <- GraphAmountAndPollSlopeByDate(Klobuchar_Iowa, "Iowa") #+ geom_smooth()
+p5
+p6 <- GraphAmountAndPollSlopeByDate(Sanders_Iowa, "Iowa") #+ geom_smooth()
+p6
+p7 <- GraphAmountAndPollSlopeByDate(Warren_Iowa, "Iowa") #+ geom_smooth()
+p7
+p8 <- GraphAmountAndPollSlopeByDate(Yang_Iowa, "Iowa") #+ geom_smooth()
+p8
+
+# ggsave("Biden_Iowa with reg.png", plot=p1)
+# ggsave("Booker_Iowa with reg.png", plot=p2)
+# ggsave("Buttigieg_Iowa with reg.png", plot=p3)
+# ggsave("Harris_Iowa with reg.png", plot=p4)
+# ggsave("Klobuchar_Iowa with reg.png", plot=p5)
+# ggsave("Sanders_Iowa with reg.png", plot=p6)
+# ggsave("Warren_Iowa with reg.png", plot=p7)
+# ggsave("Yang_Iowa with reg.png", plot=p8)
+
+```
+``` {r, eval = TRUE, echo = TRUE}
+library(ggplot2)
+library(gganimate)
+library(gapminder)
+library(tidyr)
+library(dplyr)
+
+#Graphing Iowa Graphs
+p1 <- GraphAmountAverageAndPollByDate(Biden_Iowa, "Iowa")
+p1
+p2 <- GraphAmountAverageAndPollByDate(Booker_Iowa, "Iowa") #+ geom_smooth()
+p2
+p3 <- GraphAmountAverageAndPollByDate(Buttigieg_Iowa, "Iowa") #+ geom_smooth()
+p3
+p4 <- GraphAmountAverageAndPollByDate(Harris_Iowa, "Iowa") #+ geom_smooth()
+p4
+p5 <- GraphAmountAverageAndPollByDate(Klobuchar_Iowa, "Iowa") #+ geom_smooth()
+p5
+p6 <- GraphAmountAverageAndPollByDate(Sanders_Iowa, "Iowa") #+ geom_smooth()
+p6
+p7 <- GraphAmountAverageAndPollByDate(Warren_Iowa, "Iowa") #+ geom_smooth()
+p7
+p8 <- GraphAmountAverageAndPollByDate(Yang_Iowa, "Iowa") #+ geom_smooth()
+p8
+
+ggsave("Biden_Iowa by Day.png", plot=p1)
+ggsave("Booker_Iowa by Day.png", plot=p2)
+ggsave("Buttigieg_Iowa by Day.png", plot=p3)
+ggsave("Harris_Iowa by Day.png", plot=p4)
+ggsave("Klobuchar_Iowa by Day.png", plot=p5)
+ggsave("Sanders_Iowa by Day.png", plot=p6)
+ggsave("Warren_Iowa by Day.png", plot=p7)
+ggsave("Yang_Iowa by Day.png", plot=p8)
+```
+
+
+```{r, eval = TRUE, echo = TRUE}
+require(graphics)
+#Biden_Iowa
+
+rs <- lm(Contributions~Polling, data=Biden_Iowa)
+s <- summary(rs)
+r <- residuals(rs)
+s$r.squared
+names <- c("R-Squared", "Candidate")
+r.squared <- data.frame(s$r.squared, "Biden")
+colnames(r.squared) <- names
+plot(r, main="Residuals of Duration")
+fit <- fitted(rs)
+plot(fit, main = "Biden-Iowa: Fitted Residuals")
+qqnorm(r, main = "Biden-Iowa: Q-Q Plot of Residuals", col = "red", pch = 16)
+qqline(r, col = "green", lty = 2, lwd = 2)
+plot(fit,r, main = "Biden-Iowa: Plot of Residuals versus Fitted Values", xlab = "Fitted Values",
+     ylab = "Residuals", col = "red", pch = 16, ylim = c(-15, 15))
+abline(h = 0, lty = 2, lwd = 2, col = "green")
+```
+
+```{r, eval = TRUE, echo = TRUE}
+#Booker Iowa
+require(graphics)
+rs <- lm(Contributions~Polling, data=Booker_Iowa)
+s <- summary(rs)
+r <- residuals(rs)
+df <- data.frame(s$r.squared, "Booker")
+colnames(df) <- names
+r.squared <- rbind(r.squared, df)
+
+plot(r, main="Residuals of Duration")
+fit <- fitted(rs)
+plot(fit, main = "Booker-Iowa: Fitted Residuals")
+qqnorm(r, main = "Booker-Iowa: Q-Q Plot of Residuals", col = "red", pch = 16)
+qqline(r, col = "green", lty = 2, lwd = 2)
+plot(fit,r, main = "Booker-Iowa: Plot of Residuals versus Fitted Values", xlab = "Fitted Values",
+     ylab = "Residuals", col = "red", pch = 16, ylim = c(-15, 15))
+abline(h = 0, lty = 2, lwd = 2, col = "green")
+```
+
+```{r, eval = TRUE, echo = TRUE}
+#Buttigieg Iowa
+require(graphics)
+rs <- lm(Contributions~Polling, data=Buttigieg_Iowa)
+s <- summary(rs)
+r <- residuals(rs)
+df <- data.frame(s$r.squared, "Buttigieg")
+colnames(df) <- names
+r.squared <- rbind(r.squared, df)
+plot(r, main="Residuals of Duration")
+fit <- fitted(rs)
+plot(fit, main = "Buttigieg_Iowa: Fitted Residuals")
+qqnorm(r, main = "Buttigieg_Iowa: Q-Q Plot of Residuals", col = "red", pch = 16)
+qqline(r, col = "green", lty = 2, lwd = 2)
+plot(fit,r, main = "Buttigieg_Iowa: Plot of Residuals versus Fitted Values", xlab = "Fitted Values",
+     ylab = "Residuals", col = "red", pch = 16, ylim = c(-15, 15))
+abline(h = 0, lty = 2, lwd = 2, col = "green")
+```
+
+```{r, eval = TRUE, echo = TRUE}
+#Harris Iowa
+require(graphics)
+rs <- lm(Contributions~Polling, data=Harris_Iowa)
+s <- summary(rs)
+r <- residuals(rs)
+df <- data.frame(s$r.squared, "Harris")
+colnames(df) <- names
+r.squared <- rbind(r.squared, df)
+plot(r, main="Residuals of Duration")
+fit <- fitted(rs)
+plot(fit, main = "Harris_Iowa: Fitted Residuals")
+qqnorm(r, main = "Harris_Iowa: Q-Q Plot of Residuals", col = "red", pch = 16)
+qqline(r, col = "green", lty = 2, lwd = 2)
+#png(filename = "Harris_Iowa: Plot of Residuals versus Fitted Values.png")
+plot(fit,r, main = "Harris_Iowa: Plot of Residuals versus Fitted Values", xlab = "Fitted Values",
+     ylab = "Residuals", col = "red", pch = 16, ylim = c(-15, 15))
+abline(h = 0, lty = 2, lwd = 2, col = "green")
+#dev.off()
+```
+
+```{r, eval = TRUE, echo = TRUE}
+#Klobuchar Iowa
+require(graphics)
+rs <- lm(Contributions~Polling, data=Klobuchar_Iowa)
+s <- summary(rs)
+r <- residuals(rs)
+df <- data.frame(s$r.squared, "Klobuchar")
+colnames(df) <- names
+r.squared <- rbind(r.squared, df)
+plot(r, main="Residuals of Duration")
+fit <- fitted(rs)
+plot(fit, main = "Klobuchar_Iowa: Fitted Residuals")
+qqnorm(r, main = "Klobuchar_Iowa: Q-Q Plot of Residuals", col = "red", pch = 16)
+qqline(r, col = "green", lty = 2, lwd = 2)
+plot(fit,r, main = "Klobuchar_Iowa: Plot of Residuals versus Fitted Values", xlab = "Fitted Values",
+     ylab = "Residuals", col = "red", pch = 16, ylim = c(-15, 15))
+abline(h = 0, lty = 2, lwd = 2, col = "green")
+```
+
+```{r, eval = TRUE, echo = TRUE}
+#Sanders Iowa
+require(graphics)
+rs <- lm(Contributions~Polling, data=Sanders_Iowa)
+s <- summary(rs)
+r <- residuals(rs)
+df <- data.frame(s$r.squared, "Sanders")
+colnames(df) <- names
+r.squared <- rbind(r.squared, df)
+
+plot(r, main="Residuals of Duration")
+fit <- fitted(rs)
+plot(fit, main = "Sanders_Iowa: Fitted Residuals")
+qqnorm(r, main = "Sanders_Iowa: Q-Q Plot of Residuals", col = "red", pch = 16)
+qqline(r, col = "green", lty = 2, lwd = 2)
+plot(fit,r, main = "Sanders_Iowa: Plot of Residuals versus Fitted Values", xlab = "Fitted Values",
+     ylab = "Residuals", col = "red", pch = 16, ylim = c(-15, 15))
+abline(h = 0, lty = 2, lwd = 2, col = "green")
+```
+
+```{r, eval = TRUE, echo = TRUE}
+#Warren Iowa
+require(graphics)
+rs <- lm(Contributions~Polling, data=Warren_Iowa)
+s <- summary(rs)
+r <- residuals(rs)
+df <- data.frame(s$r.squared, "Warren")
+colnames(df) <- names
+r.squared <- rbind(r.squared, df)
+
+plot(r, main="Residuals of Duration")
+fit <- fitted(rs)
+plot(fit, main = "Warren_Iowa: Fitted Residuals")
+qqnorm(r, main = "Warren_Iowa: Q-Q Plot of Residuals", col = "red", pch = 16)
+qqline(r, col = "green", lty = 2, lwd = 2)
+plot(fit,r, main = "Warren_Iowa: Plot of Residuals versus Fitted Values", xlab = "Fitted Values",
+     ylab = "Residuals", col = "red", pch = 16, ylim = c(-15, 15))
+abline(h = 0, lty = 2, lwd = 2, col = "green")
+```
+
+```{r, eval = TRUE, echo = TRUE}
+#Yang Iowa
+require(graphics)
+rs <- lm(Contributions~Polling, data=Yang_Iowa)
+s <- summary(rs)
+r <- residuals(rs)
+df <- data.frame(s$r.squared, "Yang")
+colnames(df) <- names
+r.squared <- rbind(r.squared, df)
+
+plot(r, main="Residuals of Duration")
+fit <- fitted(rs)
+plot(fit, main = "Yang_Iowa: Fitted Residuals")
+qqnorm(r, main = "Yang_Iowa: Q-Q Plot of Residuals", col = "red", pch = 16)
+qqline(r, col = "green", lty = 2, lwd = 2)
+plot(fit,r, main = "Yang_Iowa: Plot of Residuals versus Fitted Values", xlab = "Fitted Values",
+     ylab = "Residuals", col = "red", pch = 16, ylim = c(-15, 15))
+abline(h = 0, lty = 2, lwd = 2, col = "green")
+```
+```{r, eval = TRUE, echo = TRUE}
+t(r.squared)
+
+```
+
+
+

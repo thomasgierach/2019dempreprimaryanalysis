@@ -1,0 +1,126 @@
+---
+title: "Investigating the Link Between Polling and Individual Contributions in the 2020 Pre-Primary"
+author: "Thomas Gierach"
+date: "12/9/2019"
+output: html_document
+---
+
+The United States is considered a democracy in the broadest sense, and yet the way its elections are often funded are through individual campaign donations and through Super Political Action Committees (Super PAC's), with Super PAC's and other "dark money" making up a significant portion of political donations [1]. Super PAC's are funded from the wealthy in the United States. Thus, if Candidate A is funded primarily from individual campaign donations and Candidate B is funded primarily from Super PAC's, the competition simplifies into a race between the wishes of the common folk vs. the oligarchs. In the 2020 Democratic Presidential Pre-Primary, a possible linear correlation between how much individual campaign donations to a particular candidate and his or her place in the polls in each state deserves investigation to get a better understanding of how well the United States is functioning as a democracy.
+
+Thus, the null hypothesis is that there is no causal relationship between individual campaign donations and poll numbers. The alternative hypothesis would that there is a causal relationship.
+
+Individual donation data for each state was obtained from *Propublica*, and political polling data by state was obtained from *RealClearPolitics*. Due to some states receiving more polls in 2019, it was more relevant to explore the relationship between individual campaign donations and poll numbers in the states of Iowa, New Hampshire, South Carolina, California, Texas, Nevada, and Massachusetts. Why they receive more political polls than others has to do with either the date of their primaries and/or the size of their population. 
+
+The number of candidates who announced their candidacy for the Democratic nomination was at one point over twenty individuals. Candidates like Kirsten Gillibrand, Eric Swalwell, and Jay Inslee, quickly dropped out of the race due to insufficient funding and poll numbers. Therefore, it was more relevant to look at the candidates who survived the first three quarters of the 2019: Joe Biden, Cory Booker, Pete Buttigieg, Kamala Harris, Amy Klobuchar, Bernie Sanders, Elizabeth Warren, and Andrew Yang. These candidates were also represented in most of the polls for the states selected above. Polling data for candidates who had already dropped out of the race were unavailable in the data from RealClearPolitics.
+
+The challenges with this data were 1) the dates of the polling data were listed as a date range rather than a single date, 2) there were some missing data for candidates in both polling (as they were not included in the poll) and in the donation data, 3) the number of .csv files was quite large. The latter problem required a greater use of functions in order to save typing time and space. For instance, given the eight candidates and seven states chosen, had functions not been used, many unnecessary variables would have been created, and perhaps thousands more lines of code would have had to have been written.
+
+After importing the .csv files as data frames, the polling data and individual contribution data needed to be subsetted by the eight candidates chosen. This was done by making vectors of the candidates' respective last names and their respective committee names. Then these vectors were run through a function that obtained the following information: polling and donation data aggregated by quarter and month.
+
+```{r, eval = FALSE, echo = TRUE}
+Operation2 <- function(data, poll_data, candidate_pac_name, candidate_name){
+  # Subsets contribution data and poll_data by candidate_pac_name and candidate_name respectively.
+  # Interpolates the Polling Data. Sums by day the contribution data.
+  # Combines this new polling and contribution data into a dataframe.
+  # 
+  # Args:
+  #   data:               a dataframe containing donations for a single state
+  #   poll_data:          a dataframe containing polling numbers for a single state
+  #   candidate_pac_name: a string of the candidate's committee name
+  #   candidate_name:     a string of the candidate's last name
+  # 
+  # Returns:
+  #   df_to_return
+  
+  # getting the quarter averages for the state
+  candidate_state_poll <- PollByCandidate(poll_data, candidate_name)
+  # getting Interpolated Poll Data
+  candidate_state_poll_interpolated <- InterpolatePollByCandidate(candidate_state_poll)
+  
+  # isolating candidate name
+  candidate <- SubsetOfStateByCommitteeName(data, candidate_pac_name)
+  
+  # getting running total by day for contributions
+  candidate_summed <- AverageDonationDataByDay(candidate, min(candidate_state_poll$Date))
+  y = candidate_summed
+
+  # making sure the dataframe only goes to max(date) of contribution data
+  x = candidate_state_poll_interpolated
+  x <- x[x$Date <= max(candidate$date), ]
+  
+  # getting the slopes for both polls
+  Poll_Slopes <- GetSlopes(x)
+  Contribution_Slopes <- GetSlopes(y)
+  
+  # putting all data into data frames
+  names <- c("Date", "Polling", "Contributions", "Poll_Slopes", "Contribution_Slopes", "Candidate")
+  name <- rep(candidate_name, times = length(x$Date))
+  df2 <- cbind(x, y[,2], Poll_Slopes, Contribution_Slopes,name)
+  colnames(df2) <- names
+  
+  # converting zeros in Contributions to NA's and removing
+  df2[df2$Contributions == 0,] <- NA
+  df2 <- na.omit(df2)
+  
+  df2 <- SlopesToBinary(df2)
+  
+  return(df2)
+}
+```
+
+After gathering the quarterly and monthly data, it was useful in looking at overall trends for each candidate by graphing a time series by month for each candidate in each state using ggplot2. In order visualize this data properly, the polling numbers sometimes needed to be increased by 1,000x-10,000x the original range of [0.00, 0.99]. Much of the time the slopes in the monthly data points for the donations and polling are nearly identical. However, in many cases, even in the same graph, the slopes diverge in opposite directions. This immediately sparked a realization that the modeling was perhaps wrong.
+
+```{r, echo = FALSE, eval = FALSE}
+GraphAmountAverageAndPollByDate <- function(state_data, state) {
+  # multiping the Polling Date by 10 to better visualize it
+  state_data$Polling <- (state_data$Polling)*(10)
+  df <- state_data %>%
+  # selecting the variables to use in the graph
+      select(Date, Contributions, Polling) %>%
+  # the keys are above and the values are what their values by Date
+      gather(key = "variable", value = "value", -Date)
+  # Plotting the data with Date on the x and the other variables on the y
+  ggplot(df, aes(x = Date, y = value)) +
+  geom_line(aes(color = variable), size = 1) +
+    # Creating the colors for the graph
+  scale_color_manual(values = c("#00AFBB", "#E7B800")) +
+  theme_minimal() + ggtitle(paste(state, ": Polling and Individual Donations for ", state_data$Candidate[1], sep = "")) + xlab("2019 by Day") + ylab("Daily Contriibutions and Polling Data (x1000-10000)")
+  #source for code: http://www.sthda.com/english/articles/32-r-graphics-essentials/128-plot-time-series-data-using-ggplot/
+}
+}
+```
+
+
+The poll data and the donation data needed to be interpolated due to have too few data points to perform a linear regression. In order to interpolate the donation data, an average daily amount of donations was chosen as a variable over a six to eight month period, depending on the candidate. After doing the interpolation, regressions were run for each candidate listed above just in the state of Iowa. The front-runner candidates (Biden, Buttigieg, Sanders, Warren, and Yang) had the best r-squared values while the candidates who are not doing as well there currently had the worst r-squared values. 
+
+![Table of R-Squared Values for each candidate in the state of Iowa. ](C:/Users/giera/OneDrive/Documents/School/R/Projects/STAT_382_Final_Project/Pictures/R-Squared.png)
+
+
+![There is a low R-Squared for Joe Biden between Average Daily Contributions and Daily Poll Numbers. This time series demonstrates that in a better visual representation than just a plot between these two variables.](C:/Users/giera/OneDrive/Documents/School/R/Projects/STAT_382_Final_Project/Pictures/Biden_Iowa by Day.png)
+
+![There is a higher r-squared value for Pete Buttigieg with the same variables.](C:/Users/giera/OneDrive/Documents/School/R/Projects/STAT_382_Final_Project/Pictures/Buttigieg_Iowa by Day.png)
+
+![Also, there is an even higher r-squared value for Elizabeth Warren with the same variables.](C:/Users/giera/OneDrive/Documents/School/R/Projects/STAT_382_Final_Project/Pictures/Warren_Iowa by Day.png)
+
+Plotting residuals, fitted residuals, qqplots of residuals, and residuals versus fitted resulted in a model that fit better with Buttigieg and Warren than the other candidates.The error followed the normal distribtution for Warren quite closely as seen in the QQplot of Residuals below. Booker, Buttigieg, Klobuchar, and Sanders also followed quite well, while Biden, Harris, and Yang did not follow it that well. 
+
+![The residuals for Pete Buttigieg follow a normal distribution quite closely with only outliers on the tail and head.](C:/Users/giera/OneDrive/Documents/School/R/Projects/STAT_382_Final_Project/Pictures/Buttigieg_Iowa QQPlot.png)
+
+![The residuals vs. fitted values plot has several outliers most likely due to the beginning of his campaign where his polling was quite meager compared to his donations. However, there does not seem to be any pattern in the rest of the plot.](C:/Users/giera/OneDrive/Documents/School/R/Projects/STAT_382_Final_Project/Pictures/Buttigieg_Iowa Residuals v Fitted.png)
+
+![The residuals follow a normal distribution quite closely with only a few outliers on the tail and head.](C:/Users/giera/OneDrive/Documents/School/R/Projects/STAT_382_Final_Project/Pictures/Warren_Iowa QQPlot.png)
+
+![The Plot of Residuals vs. Fitted Values does not seem to have any patterns to it. However, the points are collected in four different blocks.](C:/Users/giera/OneDrive/Documents/School/R/Projects/STAT_382_Final_Project/Pictures/Warren_Iowa Fitted v Residuals.png)
+
+For the Residual versus fitted plots, most of the candidates did not have a random, evenly distributed plot. Warren, Buttigieg, and Sanders were a contrary case. Biden and Harris, for example, had most of their points on one side and Klobuchar had discernable shapes in hers.
+
+Due to most of the candidates not having as high of a correlation as Buttigieg and Warren, the Null Hypothesis has to not be rejected. This also suggests that there are other factors in the regression that affect the polling. A multi-variable regression would be a better model perhaps. There are numerous other possible variables to investigage such as Google Trend Data, Super PAC donation data, and positive/negative media coverage. To a point individual donations make a difference in this pre-primary. In future, pre-primaries, hopefully there will be a better relationship between polling numbers and individual donations.
+
+### Works Cited
+
+1. 2016 Presidential Race. Center for Responsive Politics. (n.d.). Retrieved from https://www.opensecrets.org/pres16/.
+
+2. Election 2020 - Iowa Democratic Presidential Caucus. (n.d.). Retrieved November 20, 2019, from https://www.realclearpolitics.com/epolls/2020/president/ia/iowa_democratic_presidential_caucus-6731.html.
+
+3. Willis, Derek, et al. “FEC Itemizer.” ProPublica, Federal Election Commission, 12 Aug. 2015, Retrieved November 20, 2019, from projects.propublica.org/itemizer/presidential-contributors/2020.
+
